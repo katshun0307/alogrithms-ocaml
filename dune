@@ -1,0 +1,8 @@
+
+; (executable 
+; (name dijkstra)
+; (libraries core))
+
+(executable 
+(name kmeans)
+(libraries core gnuplot))
