@@ -1,81 +1,90 @@
 open Core
 
+exception SetEmptyError
+
 type vertex = int
 type distance = int
+type vertex_info = vertex * distance
 type edge = vertex * vertex * distance
 
 exception Myexception
 
-class ['a] mutableQue init = object
-  val mutable v : 'a list = init
-  method push hd = 
-    if List.exists v ~f:(fun x -> x = hd) 
-    then ()
-    else v <- hd:: v
-  method pop = 
-    let r = List.hd_exn (List.rev v) in
-    v <- List.filter v ~f:(fun x -> x <> r);
-    r
-  (* match v with
-     | h:: t -> 
-     v <- t;
-     Some h
-     | [] -> None *)
-  method pop_exn = 
-    let r = List.hd_exn (List.rev v) in
-    v <- List.filter v ~f:(fun x -> x <> r);
-    r
-  method is_empty = 
-    v = []
-  method exists x = 
-    List.exists v ~f:(fun y -> x = y)
-  method print string_f = 
-    let s = "[" ^ (String.concat ~sep:";" (List.map v ~f:string_f)) ^ "]" in
-    print_string (s ^ "\n")
+module VertexSet : sig
+  type 'a t
+  val create : 'a list -> 'a t
+  val pop : ('a -> 'a -> int) -> 'a t -> 'a
+  val push : 'a t -> 'a -> unit
+  val add : 'a t -> 'a -> ('a -> 'a -> bool) -> unit
+  val is_empty : 'a t -> bool
+  val exists : 'a t -> 'a -> ('a -> 'a -> bool) -> bool
+  val to_string : 'a t -> ('a -> string) -> string
+end = struct
+  type 'a t = {mutable contents: 'a list}
+  let create (l: 'a list) = 
+    {contents = l}
+  let pop comp self = 
+    let sorted = List.sort ~compare:comp self.contents in
+    match sorted with
+    | h:: t -> self.contents <- t;  h
+    | [] -> raise SetEmptyError
+  let push self a = 
+    self.contents <- a:: self.contents
+  let exists self x eq = 
+    List.exists self.contents ~f:(eq x)
+  let add self a eq = 
+    if exists self a eq then () 
+    else push self a
+  let is_empty self = 
+    List.is_empty self.contents
+  let to_string self sf = 
+    "[" ^ String.concat ~sep:";" (List.map self.contents ~f:sf) ^ "]"
 end
 
-let closed_stack = new mutableQue [1;2;3]
-
 let dijkstra (s: vertex) (t: vertex) (edges: edge list) =
+  let open_vertices: vertex_info VertexSet.t = VertexSet.create [(s, 0)] in
+  let closed_vertices: vertex VertexSet.t = VertexSet.create [] in
   let distance_tbl = Int.Table.create () in
   let backpointer_tbl = Int.Table.create () in
-  let open_vertices = new mutableQue [s] in
-  let closed_vertices = new mutableQue [] in
-  (* make source distance 0 *)
+  let cmp = (fun (_, d1) (_, d2) -> d1 - d2) in
+  let eq = (fun x1 x2 -> cmp x1 x2 = 0) in
+  let id = fun x y -> x = y in 
   let _ = Hashtbl.add distance_tbl ~key:s ~data:0 in 
   let search_tbl (v: vertex) = 
     match Hashtbl.find distance_tbl v with
     | None -> 1000
     | Some x -> x in
-  let process_vertex (process_vertex: vertex) = 
-    let neighbors = List.fold ~init:[] ~f:(fun accum edge -> 
-        match edge with
-        | (y, x, d) when y = process_vertex -> (x, d)::accum
-        | (x, y, d) when y = process_vertex -> (x, d)::accum
-        | _ -> accum) edges in
-    let process_vertex_distance = search_tbl process_vertex in
-    List.iter neighbors ~f:(fun (v, d) -> 
-        let current_distance = search_tbl v in
-        let new_distance = process_vertex_distance + d in
-        if new_distance < current_distance 
-        then 
-          let _ = Hashtbl.add distance_tbl ~key:v ~data:new_distance in
-          let _ = Hashtbl.add backpointer_tbl ~key:v ~data:process_vertex in () 
-        else ();
-        if closed_vertices#exists v then () else open_vertices#push v);
-  in
-  while not open_vertices#is_empty do
-    open_vertices#print string_of_int;
-    let v = open_vertices#pop_exn in
-    process_vertex v;
-    closed_vertices#push v 
-  done;
+  let rec process () = 
+    if VertexSet.is_empty open_vertices
+    then ()
+    else
+      let (processing_vertex, _) = VertexSet.pop cmp open_vertices in
+      let process_vertex_distance = search_tbl processing_vertex in
+      let neighbors = List.fold ~init:[] ~f:(fun accum edge -> 
+          match edge with
+          | (y, x, d) when y = processing_vertex -> (x, d)::accum
+          | (x, y, d) when y = processing_vertex -> (x, d)::accum
+          | _ -> accum) edges in
+      List.iter neighbors ~f:(fun (v, d) -> 
+          let current_distance = search_tbl v in
+          let new_distance = process_vertex_distance + d in
+          if not (VertexSet.exists closed_vertices v id)
+          then VertexSet.add open_vertices (v, min current_distance new_distance) eq
+          else ();
+          if  current_distance <= new_distance
+          then ()
+          else ( 
+            ignore (Hashtbl.add distance_tbl ~key:v ~data:new_distance);
+            ignore (Hashtbl.add backpointer_tbl ~key:v ~data:processing_vertex);
+          ));
+      VertexSet.push closed_vertices processing_vertex;
+      print_string ("closed vertices: " ^ VertexSet.to_string closed_vertices string_of_int);
+      process()
+  in process ();
   let rec path v accum = 
     match Hashtbl.find backpointer_tbl v with
     | Some x -> path x (x :: accum)
     | None -> accum in
   (search_tbl t, path t [t])
-
 
 let test () = 
   let es =  [
@@ -96,4 +105,5 @@ let test () =
 let () = 
   let (d, p) = test () in
   print_string (string_of_int d ^ "\n");
-  print_string (String.concat ~sep:" -> " (List.map p ~f:string_of_int) ^ "\n")
+  print_string (String.concat ~sep:" -> " (List.map p ~f:string_of_int) ^ "\n");
+  print_string "done"
