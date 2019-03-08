@@ -99,8 +99,8 @@ let kmeans (data: data_point array) (k: int) (n_norm: int) =
     while not !res do
       res := graph#update_group
     done;
-    let _ = Sys.command "convert kmeans*.png result.gif" in
-    let _ = Sys.command "rm kmeans*.png" in ()
+    ignore (Sys.command "convert kmeans*.png result.gif");
+    ignore (Sys.command "rm kmeans*.png")
 
 let () = 
   let data = 
